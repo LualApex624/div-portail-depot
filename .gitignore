@@ -1,0 +1,14 @@
+# Secrets : jamais dans le depot.
+.env
+.env.local
+infra/certs/*
+!infra/certs/.gitkeep
+
+node_modules/
+dist/
+.next/
+coverage/
+*.tsbuildinfo
+
+.DS_Store
+*.log

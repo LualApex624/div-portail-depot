@@ -1,0 +1,49 @@
+# Une alerte doit conduire a une action. Trois regles, pas douze.
+#
+# Le choix est guide par ce qui casse reellement le parcours : l'API qui rend
+# des 5xx, l'API qui ne repond plus du tout, et une salve de PIN invalides qui
+# signale une attaque sur le seul secret devinable du systeme.
+
+groups:
+  - name: div-depot
+    rules:
+      # Alerte principale exigee par l'enonce : hausse durable du taux d'erreur.
+      - alert: TauxErreur5xxEleve
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+          clamp_min(sum(rate(http_requests_total[5m])), 0.001)
+            > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Plus de 5 % de reponses 5xx sur 5 minutes"
+          description: >
+            L'API renvoie durablement des erreurs serveur. Action : verifier
+            `docker compose logs api`, puis la sonde /api/ready — une panne de
+            PostgreSQL ou de Garage se manifeste d'abord ainsi.
+
+      - alert: ApiInjoignable
+        expr: up{job="div-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "L'API ne repond plus au scrape"
+          description: >
+            Aucun depot ni acces au dashboard n'est possible. Action :
+            `docker compose ps` puis `docker compose restart api`.
+
+      - alert: SalveDePinInvalides
+        expr: sum(rate(pin_failures_total[5m])) * 300 > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Plus de 20 PIN invalides sur 5 minutes"
+          description: >
+            Le lockout a 5 echecs fait deja son travail, mais un tel volume
+            indique une tentative de brute-force distribuee. Action : consulter
+            la table AuditLog (actions PIN_FAIL et REQUEST_LOCKED) et, si
+            necessaire, resserrer le throttler sur /public/:token/unlock.

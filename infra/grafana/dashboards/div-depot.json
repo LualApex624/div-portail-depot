@@ -1,0 +1,118 @@
+{
+  "uid": "div-depot",
+  "title": "DIV — Portail de depot",
+  "tags": ["div", "depot"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-3h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Disponibilite de l'API",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "HORS LIGNE", "color": "red" } } },
+            { "type": "value", "options": { "1": { "text": "EN LIGNE", "color": "green" } } }
+          ]
+        }
+      },
+      "targets": [{ "expr": "up{job=\"div-api\"}", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Taux de 5xx (5 min)",
+      "description": "Signal de l'alerte TauxErreur5xxEleve. Seuil : 5 %.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 0.001)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Objets purges (total)",
+      "description": "Preuve que l'expiration detruit les donnees et ne se contente pas d'un statut.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [{ "expr": "purge_deleted_objects_total", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Demandes creees (total)",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [{ "expr": "deposit_requests_created_total", "refId": "A" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Requetes HTTP par statut",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(http_requests_total[5m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Latence HTTP (p50 / p95)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Securite — PIN invalides et verrouillages",
+      "description": "Une salve ici signale une attaque sur le seul secret devinable du systeme.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "rate(pin_failures_total[5m]) * 300", "legendFormat": "PIN invalides / 5 min", "refId": "A" },
+        { "expr": "rate(pin_lockouts_total[5m]) * 300", "legendFormat": "Verrouillages / 5 min", "refId": "B" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Depots — acceptes et refuses par motif",
+      "description": "Le motif distingue une erreur d'usage (taille, format) d'une tentative de contournement (type reel non conforme).",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "rate(uploads_completed_total[5m]) * 300", "legendFormat": "acceptes / 5 min", "refId": "A" },
+        {
+          "expr": "sum by (reason) (rate(uploads_failed_total[5m])) * 300",
+          "legendFormat": "refuses — {{reason}}",
+          "refId": "B"
+        }
+      ]
+    }
+  ]
+}

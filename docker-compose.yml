@@ -1,0 +1,168 @@
+# Stack complete du portail de depot.
+#
+# Tous les ports sont publies sur 127.0.0.1 uniquement : rien n'est joignable
+# depuis le reseau, conformement a la contrainte d'isolation de l'enonce.
+# Seul Nginx sert de point d'entree.
+
+name: div-portail-depot
+
+services:
+  # ---------------------------------------------------------------- entree --
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: div-nginx
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${HTTP_PORT:-8080}:80"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    networks: [internal]
+
+  # ------------------------------------------------------------------- app --
+  api:
+    image: ${REGISTRY_IMAGE_API:-div-portail-depot/api}:${IMAGE_TAG:-local}
+    build:
+      context: ./backend
+    container_name: div-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${API_PORT:-4000}:4000"
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+      SERVER_PEPPER: ${SERVER_PEPPER}
+      AUDIT_IP_SALT: ${AUDIT_IP_SALT}
+      S3_ENDPOINT: http://garage:3900
+      S3_PUBLIC_ENDPOINT: ${STORAGE_PUBLIC_ORIGIN}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_REGION: garage
+      APP_PUBLIC_URL: ${PUBLIC_ORIGIN}
+      # Origines des PAGES qui appellent l'API et televersent vers Garage.
+      # L'origine du stockage n'en fait pas partie : ce n'est pas une page.
+      CORS_ORIGINS: ${PUBLIC_ORIGIN}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      AUTH_SESSION_TTL_HOURS: ${AUTH_SESSION_TTL_HOURS:-8}
+      DEPOSIT_SESSION_TTL_MINUTES: ${DEPOSIT_SESSION_TTL_MINUTES:-30}
+      PIN_MAX_ATTEMPTS: ${PIN_MAX_ATTEMPTS:-5}
+      PIN_LOCKOUT_MINUTES: ${PIN_LOCKOUT_MINUTES:-15}
+      MAX_FILE_SIZE_BYTES: ${MAX_FILE_SIZE_BYTES:-26214400}
+      MAX_FILES_PER_REQUEST: ${MAX_FILES_PER_REQUEST:-10}
+      ALLOWED_MIME_TYPES: ${ALLOWED_MIME_TYPES:-application/pdf,image/jpeg,image/png}
+      PRESIGN_PUT_TTL_SECONDS: ${PRESIGN_PUT_TTL_SECONDS:-300}
+      PRESIGN_GET_TTL_SECONDS: ${PRESIGN_GET_TTL_SECONDS:-60}
+      REAPER_CRON: ${REAPER_CRON:-0 * * * * *}
+      REAPER_ENABLED: ${REAPER_ENABLED:-true}
+    depends_on:
+      db:
+        condition: service_healthy
+      garage:
+        condition: service_healthy
+    networks: [internal]
+
+  web:
+    image: ${REGISTRY_IMAGE_WEB:-div-portail-depot/web}:${IMAGE_TAG:-local}
+    build:
+      context: ./frontend
+      args:
+        # Inlinee dans le bundle : le navigateur appelle l'API sur la meme
+        # origine que la page, a travers Nginx.
+        NEXT_PUBLIC_API_URL: ${PUBLIC_ORIGIN}/api
+    container_name: div-web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    networks: [internal]
+
+  # ---------------------------------------------------------------- donnees --
+  db:
+    image: postgres:16-alpine
+    container_name: div-db
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [internal]
+
+  garage:
+    # Garage, pas MinIO : l'edition Community de MinIO est archivee (04/2026).
+    image: dxflrs/garage:v1.0.1
+    container_name: div-garage
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GARAGE_S3_PORT:-3900}:3900"
+      - "127.0.0.1:${GARAGE_ADMIN_PORT:-3903}:3903"
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN}
+    volumes:
+      - ./infra/garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [internal]
+
+  # ---------------------------------------------------------- observabilite --
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: div-prometheus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    networks: [internal]
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: div-grafana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on: [prometheus]
+    networks: [internal]
+
+volumes:
+  postgres_data:
+  garage_meta:
+  garage_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  internal:
+    driver: bridge

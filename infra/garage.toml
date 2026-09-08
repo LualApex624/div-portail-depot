@@ -1,0 +1,28 @@
+# Configuration Garage (stockage objet S3-compatible).
+#
+# Garage remplace MinIO : l'edition Community de MinIO est archivee depuis le
+# 25 avril 2026 (plus de correctifs, plus d'images officielles). Deployer un
+# stockage non maintenu pour des pieces d'identite serait le contraire de
+# l'exercice. Garage est maintenu, tient dans ~50 Mo et parle le meme S3.
+#
+# Les secrets (rpc_secret, admin_token) ne sont pas ici : ils arrivent par les
+# variables GARAGE_RPC_SECRET et GARAGE_ADMIN_TOKEN, depuis le .env hors depot.
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+
+# Un seul noeud : ce portail n'a pas de contrainte de disponibilite qui
+# justifierait un cluster, et la replication se paierait en complexite.
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "garage:3901"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage.localhost"
+
+[admin]
+api_bind_addr = "[::]:3903"

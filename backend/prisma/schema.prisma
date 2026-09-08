@@ -1,0 +1,160 @@
+// DIV Protocol — Portail de depot de pieces
+// Modele de donnees "Split-Secret Deposit".
+//
+// Invariants portes par ce schema :
+//  - aucun secret en clair : tokenHash (HMAC-SHA256+pepper), pinHash (Argon2id),
+//    idHash des sessions (HMAC-SHA256+pepper) ;
+//  - aucun binaire en base : UploadedFile ne porte qu'une cle objet ;
+//  - AuditLog est append-only et sans cle etrangere, pour survivre a la purge.
+
+generator client {
+  provider = "prisma-client-js"
+  // L'image de production est basee sur Alpine (musl + OpenSSL 3). Sans cette
+  // cible explicite, Prisma tente de deviner la plateforme au demarrage,
+  // retombe sur openssl-1.1.x et essaie de telecharger un moteur dans un
+  // node_modules en lecture seule.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RequestStatus {
+  PENDING
+  COMPLETE
+  EXPIRED
+  LOCKED
+}
+
+enum FileStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+/// Avocat authentifie. Le client deposant n'a jamais de compte.
+model User {
+  id           String @id @default(cuid())
+  email        String @unique
+  passwordHash String
+  displayName  String
+
+  /// Incremente pour revoquer d'un coup toutes les sessions de l'avocat.
+  sessionVersion Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  requests DepositRequest[]
+  sessions AuthSession[]
+}
+
+/// Session avocat opaque, stockee cote serveur (pas de JWT : revocation immediate).
+model AuthSession {
+  id     String @id @default(cuid())
+  idHash String @unique
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Copie de User.sessionVersion au moment du login.
+  sessionVersion Int
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Demande de depot : un dossier, un lien (token) et un PIN hors bande.
+model DepositRequest {
+  id    String @id @default(cuid())
+  title String
+
+  /// HMAC-SHA256(token, SERVER_PEPPER). Le token en clair n'existe qu'une fois, en reponse.
+  tokenHash String @unique
+  /// Argon2id(pin). Le PIN en clair n'est affiche qu'une fois, a la creation.
+  pinHash   String
+
+  expiresAt DateTime
+  status    RequestStatus @default(PENDING)
+
+  /// Lockout anti brute-force sur le PIN.
+  failedPinAttempts Int       @default(0)
+  lockedUntil       DateTime?
+
+  /// Horodatage de la purge physique des objets (RGPD : preuve de destruction).
+  purgedAt DateTime?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  files    UploadedFile[]
+  sessions DepositSession[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+}
+
+/// Metadonnee d'une piece. Le binaire vit uniquement dans Garage (S3).
+model UploadedFile {
+  id        String         @id @default(cuid())
+  requestId String
+  request   DepositRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  /// Nom d'origine, conserve pour l'avocat, jamais utilise comme chemin.
+  filename String
+  /// Cle Garage. quarantine/{requestId}/{fileId} puis deposits/{requestId}/{fileId}.
+  objectKey String
+  mimeType  String
+  size      Int
+  status    FileStatus @default(PENDING)
+
+  /// Motif de rejet (type reel non conforme, taille incoherente...).
+  rejectionReason String?
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([requestId])
+}
+
+/// Session de depot opaque, delivree apres verification du PIN. TTL court.
+model DepositSession {
+  id     String @id @default(cuid())
+  idHash String @unique
+
+  requestId String
+  request   DepositRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([requestId])
+  @@index([expiresAt])
+}
+
+/// Journal d'audit append-only. Volontairement sans relation : les lignes
+/// survivent a la suppression de la demande auditee.
+model AuditLog {
+  id        String  @id @default(cuid())
+  action    String
+  requestId String?
+  userId    String?
+  /// SHA-256(ip + AUDIT_IP_SALT) : tracabilite sans donnee personnelle en clair.
+  ipHash    String
+  userAgent String?
+  result    String
+  metadata  Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([requestId])
+  @@index([action, createdAt])
+}

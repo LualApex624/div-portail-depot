@@ -1,0 +1,28 @@
+/*
+ * Feuille globale minimale.
+ *
+ * Uniquement ce qui ne peut pas vivre dans les tokens Chakra : l'animation de
+ * reveal de la charte et le respect de "prefers-reduced-motion", qui doit
+ * s'appliquer a tout le document sans exception.
+ */
+
+@keyframes divReveal {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
