@@ -1,0 +1,969 @@
+CHAT GPT DISCUSSION
+
+ME : voila pour l'exo 2 (je lui ai passé l’énoncé de l’exercice)
+
+
+Parfait. Là, on a le cahier des charges complet de l'exercice 2. Et franchement, il est nettement plus sérieux que ce que la première page laissait penser.
+Ce n'est pas simplement « faire une petite app NestJS/Next.js ». Ils veulent voir si tu sais prendre un produit de zéro, l'architecturer, le sécuriser, le tester et le déployer proprement.
+J'ai lu l'intégralité du fichier. 
+
+1. Le produit à construire
+Le scénario est simple :
+Un avocat doit récupérer des documents auprès d'un client.
+Aujourd'hui :
+
+Avocat
+   │
+   │ "Envoyez-moi vos pièces par mail"
+   ▼
+Client
+   │
+   └── pièces jointes ❌
+
+Tu dois remplacer ça par :
+
+                 TON APPLICATION
+
+Avocat ──► crée une demande
+              │
+              ▼
+       lien public + PIN
+              │
+              ▼
+          Client
+              │
+         saisit le PIN
+              │
+              ▼
+       portail de dépôt
+              │
+          upload fichiers
+              │
+              ▼
+        Stockage objet
+         (MinIO / S3)
+
+Le client n'a pas de compte. Il possède simplement :
+	•	le lien ;
+	•	le PIN.
+L'avocat, lui, est authentifié et possède un dashboard avec les demandes. 
+
+2. Le parcours utilisateur exact
+Il faut penser le projet autour de deux utilisateurs.
+‍⚖️ Avocat
+Il se connecte :
+
+/login
+
+Puis :
+
+Dashboard
+│
+├── Demande #1
+│   ├── Dossier Martin
+│   ├── En attente
+│   ├── 2 pièces / 4
+│   └── Copier le lien
+│
+├── Demande #2
+│   ├── Dossier Dupont
+│   └── Complète
+│
+└── + Créer une demande
+
+Il crée par exemple :
+
+Dossier Martin, pièces 2026
+
+L'application génère :
+
+https://ton-domaine/d/8f3a2c1b
+
+avec un PIN à 4 chiffres.
+
+3. Le client
+Il reçoit le lien.
+Il arrive sur :
+
+/d/8f3a2c1b
+
+Puis :
+
+┌─────────────────────────────┐
+│ Dépôt de pièces             │
+│                             │
+│ Code PIN                    │
+│ [ 4 ][ 8 ][ 1 ][ 6 ]       │
+│                             │
+│       Déverrouiller         │
+└─────────────────────────────┘
+
+Si le PIN est correct :
+
+┌─────────────────────────────┐
+│ Dossier Martin              │
+│                             │
+│ 2 / 4 pièces déposées       │
+│                             │
+│ ┌─────────────────────────┐ │
+│ │ Dépose tes pièces ici   │ │
+│ │ PDF JPG PNG             │ │
+│ │ 20 Mo max               │ │
+│ └─────────────────────────┘ │
+│                             │
+│ contrat.pdf         ✓       │
+│ piece-identite.jpg  62%     │
+└─────────────────────────────┘
+
+Le client doit voir la progression de l'upload et les erreurs éventuelles. 
+
+4. Ce qui est réellement obligatoire
+C'est ici que ça devient intéressant.
+ Éliminatoire
+Tu dois absolument avoir :
+Backend
+NestJS
+Frontend
+Chakra UI v3
+Authentification
+Avocat :
+
+JWT ou session
+
+Client :
+
+aucun compte
+lien + PIN
+
+Stockage
+MinIO ou S3
+Et surtout :
+aucun fichier sur le disque local de l'application.
+Installation
+Un seul :
+
+./install.sh
+
+ou :
+
+make install
+
+qui doit faire tout :
+
+build
+ ↓
+start stack
+ ↓
+migrations
+ ↓
+seed
+ ↓
+Grafana
+ ↓
+URLs
+
+Docker
+L'image doit être construite ailleurs, publiée sur :
+	•	GitHub Container Registry
+	•	ou Docker Hub
+puis simplement pullée sur le serveur.
+Ils veulent explicitement éviter :
+
+serveur
+   ↓
+git clone
+   ↓
+npm install
+   ↓
+npm build
+
+Ils veulent :
+
+local / CI
+   ↓
+docker build
+   ↓
+registry
+   ↓
+docker pull
+   ↓
+serveur
+
+
+
+5. Le parcours complet doit fonctionner
+C'est probablement le cœur du test.
+Ils veulent pouvoir faire :
+
+Login avocat
+     ↓
+Créer demande
+     ↓
+Lien + PIN générés
+     ↓
+Ouvrir lien public
+     ↓
+Entrer PIN
+     ↓
+Upload fichier
+     ↓
+Stockage MinIO/S3
+     ↓
+Dashboard avocat
+     ↓
+Statut mis à jour
+
+C'est explicitement obligatoire. 
+Donc on ne va pas perdre du temps sur des fonctionnalités secondaires avant que ce parcours soit parfaitement fonctionnel.
+
+6. La partie sécurité est importante
+Et là, je pense que DIV va être particulièrement attentif.
+Le contexte est :
+documents juridiques + pièces d'identité
+Donc il faut réfléchir comme si on construisait un vrai service de dépôt sécurisé.
+Quelques éléments importants :
+Le PIN
+On ne devrait pas stocker le PIN en clair en base.
+Plutôt :
+
+PIN
+ ↓
+hash
+ ↓
+PostgreSQL
+
+Et lors de la tentative :
+
+PIN fourni
+ ↓
+comparaison avec hash
+ ↓
+OK / refus
+
+Le token
+Le lien public doit être difficile à deviner.
+Donc pas :
+
+/d/1
+/d/2
+/d/3
+
+Mais un token cryptographiquement aléatoire.
+Expiration
+Une demande possède une date d'expiration :
+
+expiresAt
+
+À chaque accès :
+
+now > expiresAt ?
+      │
+   oui ──► refus
+      │
+    non
+      │
+      ▼
+continuer
+
+Upload
+Il faudra également valider :
+	•	taille ;
+	•	type ;
+	•	extension ;
+	•	éventuellement contenu réel du fichier.
+La vérification antivirus/type est même proposée en bonus. 
+
+7. Le modèle de données
+Je vois déjà une structure relativement naturelle.
+Quelque chose du genre :
+
+User
+ └── id
+ └── email
+ └── passwordHash
+
+DepositRequest
+ └── id
+ └── title
+ └── token
+ └── pinHash
+ └── expiresAt
+ └── status
+ └── createdAt
+ └── userId
+
+UploadedFile
+ └── id
+ └── requestId
+ └── filename
+ └── objectKey
+ └── size
+ └── mimeType
+ └── status
+ └── createdAt
+
+Relation :
+
+User
+ │
+ └── 1 ─────── N ── DepositRequest
+                       │
+                       └── 1 ───── N ── UploadedFile
+
+Mais on ne va pas encore figer ce modèle. Il faut réfléchir aux transitions de statut et à certaines contraintes avant.
+
+8. Les statuts
+Ils demandent explicitement :
+
+En attente
+Complète
+Expirée
+
+Donc il faut probablement avoir un véritable état métier :
+
+PENDING
+COMPLETE
+EXPIRED
+
+et définir précisément les transitions.
+Par exemple :
+
+PENDING
+   │
+   │ toutes les pièces nécessaires déposées
+   ▼
+COMPLETE
+
+PENDING
+   │
+   │ expiration
+   ▼
+EXPIRED
+
+Et les tests Jest doivent notamment couvrir ces transitions. 
+
+9. L'observabilité est un vrai critère
+Ça, je ne veux surtout pas qu'on fasse à moitié.
+Ils demandent :
+Prometheus + Grafana
+Mais ils précisent quelque chose de très intéressant :
+Une alerte qui se déclenche sur quelque chose qui compte vaut mieux que douze dashboards décoratifs.
+Donc ils veulent voir ta capacité à choisir ce qui est pertinent. 
+Je préférerais par exemple quelques métriques pertinentes :
+
+HTTP request rate
+HTTP error rate
+HTTP latency
+Upload failures
+PIN verification failures
+
+avec une alerte réellement utile comme :
+
+HTTP 5xx rate > X%
+
+plutôt qu'un Grafana rempli de graphiques inutiles.
+
+10. Le déploiement est presque un exercice à lui seul
+Tu as :
+
+Internet
+   │
+   ▼
+Proxy DIV
+   │
+   ├── HTTP :80
+   │
+   └── HTTPS :443
+           │
+           ▼
+       ton nginx
+           │
+     ┌─────┴─────┐
+     ▼           ▼
+  frontend    backend
+
+Et surtout :
+tes services doivent écouter sur 127.0.0.1 uniquement.
+Le proxy DIV fait le routage vers ta plage de ports. 
+Ton nginx termine le TLS et utilise ton certificat Let's Encrypt.
+Ils recommandent même d'utiliser Let's Encrypt staging / --dry-run avant de demander de vrais certificats, parce que le serveur est partagé entre candidats. 
+
+11. Et le frontend compte vraiment
+Ils ne veulent pas :
+« Backend propre, frontend vite fait ».
+Ils ont donné toute la direction artistique :
+
+Primary      #5100FF
+Secondary    #916ED8
+Background   #F7F6FF
+Soft accent  #DBCDFF
+
+Police :
+
+Inter
+400 body
+600 headings / CTA
+
+Cards :
+
+white
+border #E9E9E9
+radius 12px
+NO SHADOW
+
+Et surtout leur bouton signature :
+
+normal
+████████████████
+violet + texte blanc
+
+hover
+────────────────
+fond clair + texte violet
++ bordure violet
+
+Ils disent explicitement que l'inversion du bouton primaire au hover fait partie de ce qu'ils regarderont. 
+
+12. Mobile
+Très important.
+Ils vont regarder le rendu à 375 px.
+Pas seulement :
+« Ça ne déborde pas ».
+Mais :
+Est-ce que c'est réellement utilisable ?
+Ils vont également regarder :
+	•	états vides ;
+	•	loading ;
+	•	erreurs ;
+	•	progression upload ;
+	•	densité cohérente. 
+Donc par exemple :
+
+Loading
+   ↓
+Skeleton / spinner
+
+Upload
+   ↓
+62%
+
+Erreur
+   ↓
+"Le fichier n'a pas pu être envoyé."
+
+Pas juste une page blanche.
+
+13. Les bonus
+Une fois le produit obligatoire solide, tu peux aller chercher des points supplémentaires.
+Ils proposent :
+ Antivirus / vérification du type
+ Upload direct avec URL présignée
+Au lieu de :
+
+Client
+  ↓
+Backend
+  ↓
+MinIO
+
+faire :
+
+Client
+  ↓
+Backend → URL présignée
+  ↓
+MinIO directement
+
+C'est architecturalement intéressant.
+ Audit log
+Tracer :
+
+IP / timestamp / action
+
+etc.
+ CI
+Tests à chaque push.
+ Rate limiting + lockout PIN
+Par exemple :
+
+5 mauvais PIN
+       ↓
+blocage temporaire
+
+
+
+14. Mais attention à un piège
+Je ne veux pas qu'on fasse les bonus trop tôt.
+La hiérarchie donnée par DIV est extrêmement claire :
+
+OBLIGATOIRE
+     ↓
+ATTENDU
+     ↓
+BONUS
+
+Et ils disent :
+Obligatoire est éliminatoire.
+Donc notre stratégie sera :
+Niveau 1 — MVP fonctionnel
+
+Auth avocat
+       ↓
+Création demande
+       ↓
+Token + PIN
+       ↓
+Expiration
+       ↓
+Portail public
+       ↓
+Upload
+       ↓
+MinIO
+       ↓
+Dashboard
+
+Niveau 2 — Qualité
+
+Tests
+Validation
+Gestion erreurs
+Architecture
+Security
+Mobile
+Loading states
+
+Niveau 3 — DevOps
+
+Docker
+Registry
+install.sh
+Postgres
+MinIO
+Prometheus
+Grafana
+Nginx
+HTTPS
+Let's Encrypt
+
+Niveau 4 — Bonus
+Seulement après.
+
+15. Et l'IA : c'est un test dans le test
+C'est probablement l'aspect le plus intéressant.
+Ils disent explicitement :
+L'IA est autorisée et encouragée.
+Mais ensuite :
+Le code sera lu ligne à ligne et débriefé en entretien.
+Donc leur vraie question est :
+« Est-ce que ce candidat sait travailler avec une IA comme un ingénieur, ou est-ce qu'il sait seulement copier-coller ce qu'elle lui donne ? »
+Ils veulent voir dans ton ai-logs/ que tu :
+	•	poses des questions ;
+	•	contestes les réponses ;
+	•	corriges ;
+	•	demandes des alternatives ;
+	•	découpes le problème ;
+	•	testes les propositions.
+
+Et ça, je vais particulièrement y faire attention avec toi.
+Je ne veux pas qu'on fasse :
+« Fais-moi toute l'application DIV Protocol. »
+→ 4000 lignes de code → copier-coller → aucune compréhension.
+Ce serait exactement ce qu'ils disent vouloir détecter.
+
+16. Le test ultime
+Cette phrase du sujet est probablement la phrase la plus importante de tout l'exercice :
+Ils vont cloner ton repo sur une machine vierge et lancer ./install.sh.
+Puis ils attendent :
+
+./install.sh
+       ↓
+   installation
+       ↓
+    migration
+       ↓
+      seed
+       ↓
+   démarrage
+       ↓
+URLs affichées
+       ↓
+APPLICATION FONCTIONNELLE
+
+Et si eux doivent commencer à bricoler :
+
+cd backend
+npm install
+...
+
+alors tu as déjà perdu des points.
+
+
+ Ma lecture du test
+Si je devais pondérer mentalement le recrutement :
+ Très important
+Architecture
+Lisibilité
+Parcours fonctionnel complet
+Déploiement
+ Important
+Sécurité
+Tests
+Gestion des erreurs
+Observabilité
+ Important mais secondaire
+UI / design
+Mobile
+ Bonus
+Antivirus, presigned URLs, audit, CI, rate limiting.
+
+Et je pense qu'on peut faire quelque chose de très solide
+Mais on ne doit pas commencer à coder maintenant.
+La prochaine étape que je te propose est beaucoup plus intéressante :
+ On va concevoir l'architecture ensemble.
+Je veux qu'on définisse précisément :
+
+                    ┌──────────────┐
+                    │   Next.js    │
+                    │   Chakra UI  │
+                    └──────┬───────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │    Nginx     │
+                    │    HTTPS     │
+                    └──────┬───────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │    NestJS    │
+                    └──────┬───────┘
+                           │
+             ┌─────────────┼─────────────┐
+             ▼             ▼             ▼
+        PostgreSQL       MinIO        Metrics
+                                        │
+                                        ▼
+                                  Prometheus
+                                        │
+                                        ▼
+                                    Grafana
+
+Puis on décide :
+	•	modules NestJS ;
+	•	modèle PostgreSQL ;
+	•	stratégie JWT/session ;
+	•	génération et hash du PIN ;
+	•	gestion du token ;
+	•	expiration ;
+	•	workflow d'upload ;
+	•	statuts ;
+	•	API ;
+	•	tests ;
+	•	Docker ;
+	•	ports ;
+	•	nginx ;
+	•	install.sh.
+Une fois cette architecture validée, seulement là on code.
+Et vu qu'il te reste très peu de temps avant le 10 septembre, je te conseille de commencer immédiatement par cette phase d'architecture, plutôt que de perdre plusieurs heures à générer du code et de devoir le restructurer ensuite.
+
+
+
+ME: ok avant toutes choses on va faire un travail propre et bien structurée parlons exo 2 , pourrais tu me proposer un livret de charge correspondant à la tache de l'exo 2 tu devras:
+	•	parler de la solution a produire (c'est quoi? pour qui? )
+	•	tu parleras de la stack demandée
+	•	tu parleras des fonctionnalités demandées par ordre de priorité
+	•	tu feras un feedback sur une première approche (comment tu le ferais en justifiant tes choix sachant que tu dois faire tes choix dans un contexte de soucis métier et donc tu devras faire un merge performance optimale logiciel, tenir compte des ressources a disposition , du contexte du secteur dans lequel nous ferons la solution )
+	•	soit claire, concis et réfléchis comme un ingénieur qui agence cout et efficacité
+j'attends un pdf de ton livrable
+
+C’est fait. J’ai préparé le cahier des charges de l’exercice 2 sous forme de PDF, avec une approche volontairement orientée ingénierie produit + arbitrage coût/complexité/performance.
+Il couvre :
+	•	la solution à construire et ses utilisateurs ;
+	•	la stack imposée et le rôle de chaque brique ;
+	•	les fonctionnalités classées P0 / P1 / P2 ;
+	•	une première proposition d’architecture ;
+	•	le modèle métier minimal ;
+	•	les choix de sécurité ;
+	•	les arbitrages coût / performance / efficacité ;
+	•	la stratégie de tests et d’observabilité ;
+	•	le déploiement ;
+	•	un plan de réalisation ;
+	•	une règle d’arbitrage pour éviter de perdre du temps sur des fonctionnalités secondaires.
+Les éléments spécifiques au cahier des charges sont basés sur l'énoncé fourni, notamment les exigences produit, stack, déploiement, observabilité, sécurité et critères de review. 
+Télécharger le livrable PDF   (CDC version chatGPT fourni)
+Et je pense que ce document doit devenir notre document de référence avant de commencer l'implémentation : on pourra maintenant passer de ce cadrage à la conception détaillée de l'architecture, sans coder à l'aveugle. 
+
+GROK DISCUSSION
+
+ME: Tu es un **Architecte Full-Stack Senior** spécialisé en **sécurité des données sensibles** (secteur juridique) ET un **veilleur technologique** avec accès aux dernières tendances 2024-2026.
+Ton rôle :
+1️⃣ **Analyser** le cahier des charges ci-dessous comme un ingénieur DIV Protocol (critique, pragmatique, orienté livraison).
+2️⃣ **Explorer** les solutions existantes (open-source, SaaS, frameworks) **actuellement utilisées en production** pour des cas similaires (portails de dépôt sécurisé, partage temporaire de fichiers, gestion de PIN/tokens).
+3️⃣ **Proposer une solution alternative** à celle du cahier des charges, **justifiée par** :
+- Les lacunes/risques de la solution initiale.
+- Les bonnes pratiques 2026 (ex : gestion des tokens, stockage objet, observabilité).
+- Ton exploration des outils tendances (ex : alternatives à MinIO, méthodes d’authentification modernes, etc.).
+
+---
+
+### ** CONTEXTE : Cahier des charges DIV Protocol (Exercice 02)**
+**Objectif** : Portail de dépôt de pièces pour avocats et clients anonymes.
+**Contraintes clés** :
+- **Sécurité** : Données juridiques sensibles, expiration des liens, PIN à usage unique.
+- **Stack imposée** : NestJS (backend), Next.js + Chakra UI (frontend), MinIO/S3 (stockage), PostgreSQL (métadonnées), Docker, Nginx + Let's Encrypt, Prometheus/Grafana.
+- **Priorités** : P0 (parcours métier complet) > P1 (tests, observabilité) > P2 (bonus comme antivirus, presigned URLs).
+- **Architecture proposée** : Monolithe modulaire (vs microservices).
+- **Durée** : 1 semaine.
+
+**Lien du PDF** : [Fichier joint] (tu peux l’analyser directement).
+
+---
+
+### ** TA MISSION EN 3 ÉTAPES**
+
+#### **Étape 1 : Analyse critique du cahier des charges**
+Pour chaque section du PDF, réponds à :
+- **Points forts** : Quels choix sont pertinents ? Pourquoi ? (ex : monolithe modulaire pour simplicité).
+- **Risques/limites** : Quels sont les angles morts ? (ex : gestion des PIN en base, scalabilité de MinIO en prod, etc.).
+- **Questions ouvertes** : Quels détails manquent pour une implémentation robuste ? (ex : durée de vie des JWT, politique de rétention des fichiers).
+
+**Format** : Tableau Markdown avec colonnes `| Section | Points forts | Risques | Questions |`.
+
+---
+
+#### **Étape 2 : Exploration des solutions existantes (2024-2026)**
+**Recherche active** (utilise tes connaissances actualisées) :
+1. **Portails de dépôt sécurisé** :
+- Quels outils open-source (ex : [FileDrop](https://github.com/filedrop), [Uppy](https://uppy.io/)) ou SaaS (ex : DocuSign, Dropbox Transfer) **correspondent au besoin** ?
+- Quelles sont leurs **limites** pour ton cas (ex : manque de contrôle sur l’expiration, coûts, etc.) ?
+2. **Gestion des tokens/PIN** :
+- Quelles sont les **meilleures pratiques** en 2026 pour générer/stocker des tokens temporaires ? (ex : JWT avec short-lived claims, HashiCorp Vault pour les secrets).
+- Exemples de bibliothèques frameworks (NestJS, Next.js) pour implémenter ça **rapidement**.
+3. **Stockage objet** :
+- Alternatives à MinIO/S3 **compatibles Docker** et adaptées aux petits déploiements ? (ex : [SeaweedFS](https://github.com/seaweedfs/seaweedfs), [Garage](https://garagehq.deuxfleurs.fr/)).
+- Comment gérer la **sécurité** (chiffrement côté client, scan antivirus) ?
+4. **Observabilité** :
+- Quels **outils légers** (vs Prometheus/Grafana) pourraient suffire pour ce projet ? (ex : [Grafana Loki](https://grafana.com/oss/loki/) pour les logs, [OpenTelemetry](https://opentelemetry.io/)).
+5. **Bonus** :
+- Y a-t-il des **standards juridiques** (ex : RGPD, normes avocats) à respecter pour ce type de portail ?
+
+**Format** :
+Pour chaque thème, liste :
+- **Solution** | **Avantages** | **Inconvénients** | **Lien/Source** (si disponible) | **Adéquation avec DIV Protocol (✅/❌)**.
+
+---
+#### **Étape 3 : Proposition d’une solution alternative**
+**Contraintes** :
+- Doit **répondre à 100% des P0** du cahier des charges.
+- Doit **améliorer** au moins 2 aspects majeurs de la solution initiale (ex : sécurité, simplicité de déploiement, UX).
+- Doit **utiliser la stack imposée** (sauf si tu justifies un changement critique).
+- Doit être **réalisable en 1 semaine**.
+
+**Attendu** :
+1. **Architecture revisitée** : Schéma Mermaid ou tableau comparatif vs la solution initiale.
+2. **Choix techniques** :
+- Backend : Modules NestJS à modifier/ajouter (ex : module dédié à la gestion des PIN).
+- Frontend : Composants Next.js/Chakra UI à optimiser (ex : gestion des erreurs d’upload).
+- Stockage : Alternative à MinIO si pertinent (justifier).
+- Sécurité : Méthodes pour renforcer la protection des données (ex : chiffrement des fichiers avant upload).
+3. **Roadmap réaliste** : Étapes pour implémenter ta solution en 7 jours (ex : Jour 1 = Setup Docker + PostgreSQL, Jour 2 = Auth + JWT, etc.).
+4. **Justification** :
+- Pourquoi ta solution est **meilleure** que celle du cahier des charges ?
+- Quels **risques** elle élimine ou réduit ?
+- Quels **coûts** (complexité, temps) elle introduit ?
+
+**Format** :
+- **Titre** : "Solution Alternative : [Nom]"
+- **Résumé** : 1 paragraphe expliquant l’idée centrale.
+- **Détails techniques** : Sous-parties claires (Architecture, Stack, Sécurité, Déploiement).
+- **Comparatif** : Tableau vs solution initiale (critères : sécurité, performance, complexité, coût).
+
+---
+### ** CONSIGNES SPÉCIFIQUES POUR GROK**
+- **Actualité** : Priorise les outils/frameworks **sortis ou mis à jour en 2024-2026**.
+- **Sources** : Cite des **liens GitHub, articles techniques, ou docs officielles** pour chaque solution explorée.
+- **Pragmatisme** : Évite les propositions "théoriquement parfaites" mais **irréalisables en 1 semaine**.
+- **Style** : Sois **direct et technique** (pas de fluff), mais explique les choix comme à un junior en stage.
+- **Langue** : **Français** (je suis francophone).
+
+---
+### ** EXEMPLE DE RÉPONSE ATTENDUE**
+*(Pour t’aider à calibrer le niveau de détail)*
+
+**Étape 1 : Analyse**
+```
+| Section             | Points forts                | Risques                         | Questions                                  |
+| ------------------- | --------------------------- | ------------------------------- | ------------------------------------------ |
+| Monolithe modulaire | Simplicité, débogage facile | Scalabilité limitée             | Comment gérer 1000+ demandes simultanées ? |
+| MinIO               | Stockage objet découplé     | Configuration complexe en local | Faut-il chiffrer les buckets par défaut ?  |
+```
+
+**Étape 2 : Exploration**
+**Portails de dépôt sécurisé** :
+- **Uppy + Companion** : ✅ Open-source, intégration facile avec Next.js, gestion des uploads chunkés.
+❌ Pas de gestion native des PIN/tokens expirants.
+ [Lien](https://uppy.io/docs/companion/)
+- **FileDrop** : ✅ Focus sur le partage temporaire, compatible Docker.
+❌ Moins flexible pour l’authentification avocat.
+
+**Étape 3 : Solution Alternative**
+**Titre** : "Portail avec Tokens JWT + Presigned URLs + Scan Antivirus"
+**Résumé** : Remplace le système PIN + lien public par des **JWT short-lived** (5 min) + **presigned URLs S3** pour les uploads, avec un scan ClamAV avant stockage.
+**Pourquoi ?** :
+- Élimine le risque de fuite de PIN (JWT signés côté serveur).
+- Les presigned URLs sont **nativement sécurisées** par AWS/MinIO.
+- ClamAV ajoute une couche de sécurité **sans surcoût** (image Docker disponible).
+
+---
+**À toi, Grok !** Analyse ce cahier des charges, explore les alternatives, et propose-moi une solution qui **dépasse** celle du PDF.
+
+RETOUR PDF DE GROK RAPPORT COMPLET
+
+CLAUDE CODE DISCUSSION
+
+ME:  PROMPT POUR AGENTS DE CODAGE (Opus 5) Mission : Implémenter Split-Secret Deposit (solution alternative de Grok) pour l’Exercice 02 de DIV Protocol,, avec un code propre, sécurisé, testé et déployable en one-click.
+ CONTEXTE & DOCUMENTS DE RÉFÉRENCE  Documents à intégrer (tous fournis en upload) Document Rôle À en extraire DIV_Portail_de_dépot_dPièce_énnoncé.pdf Contraintes obligatoires Stack imposée (NestJS, Next.js, Chakra UI v3, MinIO/S3, Docker, Nginx, Let's Encrypt), parcours métier, critères éliminatoires (P0), bonus, charte graphique, déploiement (127.0.0.1, registre, HTTPS). Grok_Rapport_Split_Secret_Deposit_DIV_Protocol_EXO2.pdf Solution cible Architecture alternative : Garage (pas MinIO), split-secret (token + PIN), PUT présigné, purge physique, session opaque, lockout PIN, audit log. À implémenter prioritairement. GPT_Livrable_Cahier_des_charges_EXO2_DIV_Protocol.pdf Base technique Modèle de données (User, DepositRequest, UploadedFile), priorités P0/P1/P2, tests Jest, observabilité.
+⚠️ PROBLÈMES CRITIQUES IDENTIFIÉS PAR GROK (À CORRIGER) Problème dans le CDC initial Solution dans Split-Secret Deposit Pourquoi c'est bloquant MinIO CE archivé (25/04/2026) ✅ Remplacer par Garage (S3-compatible, maintenu, ~50 MB) Déployer MinIO = fail de sécurité en 2026. PIN 6 chiffres brute-forceable ✅ PIN 8 chiffres + Argon2id + lockout (5 échecs → 15 min) 10^6 combinaisons = cassable en minutes. Expiration sans purge physique ✅ DeleteObjects (Garage) + invalidation sessions RGPD : un flag expired ≠ purge des données. Upload via API NestJS ✅ PUT présigné direct vers Garage DoS possible (binaire traverse NestJS). JWT pour client anonyme ✅ Session opaque + cookie HttpOnly JWT dans localStorage = risque XSS (2025-2026).
+ SOLUTION À IMPLÉMENTER : SPLIT-SECRET DEPOSIT (Version synthétique du rapport Grok, adaptée pour le codage)  Architecture Technique Finale graph TD A[Client] -->|1. Login| B[Next.js] B -->|2. Créer demande| C[NestJS] C -->|3. Génère token+PIN| D[PostgreSQL] C -->|4. PUT présigné| E[Garage] A -->|5. /d/:token| F[Page PIN] F -->|6. Unlock (PIN)| C C -->|7. Session opaque| F F -->|8. PUT direct| E E -->|9. Complete| C C -->|10. Dashboard| B G[Réaper] -->|11. Purge physique| E G -->|12. Invalide sessions| D
+ Stack Technique (Validée par DIV + Grok) Composant Choix Pourquoi Version Backend NestJS Imposé + modulaire v10+ Frontend Next.js + Chakra UI v3 Imposé + charte DIV Next.js 14+, Chakra 3.x Stockage objet Garage (pas MinIO) MinIO CE archivé (04/2026), Garage = S3-compatible, maintenu, léger garagehq.deuxfleurs.fr Base de données PostgreSQL Imposé pour métadonnées 15+ Auth avocat Session cookie (HttpOnly, Secure, SameSite=Lax) Pas de JWT (risque XSS) express-session ou @nestjs/session PIN Argon2id (8 chiffres) Résiste au brute-force (OWASP 2026) argon2@^0.31.0 Token HMAC-SHA256 + pepper Haute entropie (128 bits), jamais stocké en clair crypto Node.js Upload PUT présigné (Garage) Binaire ne traverse pas NestJS @aws-sdk/s3-request-presigner Observabilité Prometheus + Grafana + Pino(logs JSON) Métriques HTTP + métier + audit prom-client, pino Déploiement Docker Compose + GHCR + Nginx + Let's Encrypt Imposé certbot, nginx:alpine
+️ Modèle de Données (Prisma/TypeORM) // Schema Prisma (recommandé pour rapidité) model User { id String @id @default(cuid()) email String @unique passwordHash String // Argon2id sessionVersion Int @default(0) // Pour invalider toutes les sessions createdAt DateTime @default(now()) updatedAt DateTime @updatedAt requests DepositRequest[] }
+model DepositRequest { id String @id @default(cuid()) title String tokenHash String // HMAC-SHA256(token, PEPPER) pinHash String // Argon2id(PIN) expiresAt DateTime status RequestStatus @default(PENDING) userId String user User @relation(fields: [userId], references: [id]) files UploadedFile[] sessions DepositSession[] createdAt DateTime @default(now()) updatedAt DateTime @updatedAt
+@@index([tokenHash]) @@index([userId]) }
+model UploadedFile { id String @id @default(cuid()) requestId String request DepositRequest @relation(fields: [requestId], references: [id]) filename String objectKey String // Chemin dans Garage (ex: deposits/{requestId}/{fileId}) mimeType String size Int status FileStatus @default(PENDING) createdAt DateTime @default(now()) }
+model DepositSession { id String @id @default(cuid()) idHash String // HMAC-SHA256(sessionId, PEPPER) requestId String request DepositRequest @relation(fields: [requestId], references: [id]) expiresAt DateTime // TTL 30 min consumed Boolean @default(false) createdAt DateTime @default(now()) }
+model AuditLog { id String @id @default(cuid()) action String // "UNLOCK_SUCCESS", "PIN_FAIL", "UPLOAD_COMPLETE", "PURGE" requestId String? userId String? ipHash String // SHA-256(IP + salt) pour RGPD userAgent String? result String // "SUCCESS", "FAILURE" metadata Json? createdAt DateTime @default(now()) }
+enum RequestStatus { PENDING COMPLETE EXPIRED LOCKED }
+enum FileStatus { PENDING ACCEPTED REJECTED }
+ Flux Métier Détaillé (À implémenter) 1️⃣ Côté Avocat (Authentifié) Login (POST /auth/login) Input: { email, password } Vérification: Argon2id.verify(passwordHash, password) Réponse: Cookie de session (HttpOnly, Secure, SameSite=Lax, Max-Age=8h) Jamais de JWT (risque XSS). Créer une demande (POST /requests) Input: { title, expiresInHours } (24/48/72/168h) Génération: token = crypto.randomBytes(32).toString('base64url') pin = crypto.randomInt(10000000, 99999999).toString().padStart(8, '0') Stockage: tokenHash = HMAC-SHA256(token, PEPPER) pinHash = Argon2id.hash(pin) Réponse: { url: /d/${token}, pin, expiresAt } ⚠️ Afficher le PIN une seule fois (modal bloquant + toast "Copié !"). Dashboard (GET /requests) Liste paginée des DepositRequest (filtre userId = currentUser.id) Statut: PENDING/COMPLETE/EXPIRED/LOCKED Download: GET /requests/:id/files/:fileId/url → Presigned GET URL (60s, scoped userId).
+2️⃣ Côté Client (Anonyme) Accès au lien (GET /d/:token) Vérification: exists(tokenHash) et status === PENDING et expiresAt > now Affiche: Champ PIN (8 chiffres) + bouton "Déverrouiller". Déverrouillage (POST /public/:token/unlock) Input: { pin } Vérification: Argon2id.verify(pinHash, pin) Lockout: Si 5 échecs → status = LOCKED, lockedUntil = now + 15min Rate-limit: 10 tentatives/min/IP (@nestjs/throttler) Réponse: Cookie deposit_sid (session opaque, TTL 30 min, HttpOnly, Secure, SameSite=Strict). Dépôt de fichiers (POST /public/:token/files/init) Input: { filename, mimeType, size } Validation: mimeType ∈ ['application/pdf', 'image/jpeg', 'image/png', ...] size ≤ 25 Mo Magic-bytes: Vérifier le type réel via file-type (npm) Réponse: Presigned PUT URL (5 min) vers quarantine/{requestId}/{fileId}. Upload direct (PUT vers Garage) Client upload via Uppy (@uppy/aws-s3) sans Companion (pour éviter un process supplémentaire). Pas de code backend pour gérer le flux binaire. Finalisation (POST /public/:token/files/complete) Input: { fileId, etag } Vérification: HeadObject (taille correspond) GetObject (range 64 Ko) → validation magic-bytes (anti-spoof) CopyObject vers deposits/{requestId}/{fileId} DeleteObject (quarantine) Mise à jour: UploadedFile.status = ACCEPTED Si tous les fichiers ACCEPTED → DepositRequest.status = COMPLETE.
+3️⃣ Réaper (Purge Physique) Tâche cron (node-cron ou sidecar Docker) toutes les 60 secondes: // reaper.service.ts@Cron('* * * * *') // Toutes les minutesasync purgeExpired() { const expiredRequests = await this.prisma.depositRequest.findMany({ where: { expiresAt: { lt: new Date() }, status: { in: [RequestStatus.PENDING, RequestStatus.COMPLETE] } }, }); for (const request of expiredRequests) { // 1. DeleteObjects (quarantine + deposits) await this.objectStore.deletePrefix(deposits/${request.id}); await this.objectStore.deletePrefix(quarantine/${request.id}); // 2. Invalider les sessions await this.prisma.depositSession.deleteMany({ where: { requestId: request.id } }); // 3. Mettre à jour le statut await this.prisma.depositRequest.update({ where: { id: request.id }, data: { status: RequestStatus.EXPIRED }, }); // 4. Audit log await this.auditLogService.log({ action: 'PURGE', requestId: request.id, result: 'SUCCESS', }); }}
+ EXEMPLES DE CODE PRÊTS À UTILISER 1️⃣ Backend (NestJS) Module Crypto (Argon2id + HMAC) // src/crypto/crypto.module.ts import { Module } from '@nestjs/common'; import * as argon2 from 'argon2';
+@Module({ providers: [ { provide: 'ARGON2', useValue: new argon2.Argon2id({ memoryCost: 19456, // 19 MiB (OWASP 2026) timeCost: 2, // 2 itérations parallelism: 1, // 1 thread }), }, { provide: 'PEPPER', useValue: process.env.SERVER_PEPPER, // Généré via openssl rand -hex 32 }, ], exports: ['ARGON2', 'PEPPER'], }) export class CryptoModule {}
+Service de Génération de Token/PIN // src/deposit/deposit.service.ts import { Injectable, Inject } from '@nestjs/common'; import { createHmac } from 'crypto'; import * as argon2 from 'argon2';
+@Injectable() export class DepositService { constructor( @Inject('ARGON2') private readonly argon2: argon2.Argon2id, @Inject('PEPPER') private readonly pepper: string, ) {}
+async generateTokenAndPin(): Promise<{ token: string; pin: string; tokenHash: string; pinHash: string }> { const token = this.generateRandomToken(); const pin = this.generateRandomPin();
+const tokenHash = this.hashToken(token);  
+const pinHash = await this.hashPin(pin);
+
+return { token, pin, tokenHash, pinHash };  
+}
+private generateRandomToken(): string { return createHmac('sha256', this.pepper) .update(crypto.randomBytes(32)) .digest('base64url'); }
+private generateRandomPin(): string { return crypto.randomInt(10000000, 99999999).toString().padStart(8, '0'); }
+private hashToken(token: string): string { return createHmac('sha256', this.pepper).update(token).digest('hex'); }
+private async hashPin(pin: string): Promise<string> { return this.argon2.hash(pin); }
+async verifyPin(pinHash: string, pin: string): Promise<boolean> { return this.argon2.verify(pinHash, pin); } }
+Contrôleur Public (Unlock + Files) // src/public-deposit/public-deposit.controller.ts import { Controller, Post, Param, Body, Res, Req, UseGuards } from '@nestjs/common'; import { Throttle } from '@nestjs/throttler'; import { Response, Request } from 'express'; import { PublicDepositService } from './public-deposit.service'; import { ZodValidationPipe } from '../pipes/zod-validation.pipe'; import { UnlockDto } from './dto/unlock.dto'; import { InitUploadDto } from './dto/init-upload.dto';
+@Controller('public') export class PublicDepositController { constructor(private readonly publicDepositService: PublicDepositService) {}
+@Throttle(10, 60) // 10 requêtes/min/IP @Post(':token/unlock') async unlock( @Param('token') token: string, @Body(new ZodValidationPipe(UnlockDto)) dto: UnlockDto, @Req() req: Request, @Res() res: Response, ) { const result = await this.publicDepositService.unlock(token, dto.pin, req.ip); if (!result.success) { return res.status(401).json({ error: 'Invalid or expired token/PIN' }); } // Set session cookie res.cookie('deposit_sid', result.sessionId, { httpOnly: true, secure: true, sameSite: 'strict', maxAge: 30 * 60 * 1000, // 30 min path: '/', }); return res.json({ status: 'unlocked' }); }
+@Post(':token/files/init') @UseGuards(SessionGuard) // Vérifie le cookie deposit_sid async initUpload( @Param('token') token: string, @Body(new ZodValidationPipe(InitUploadDto)) dto: InitUploadDto, @Req() req: Request, ) { return this.publicDepositService.initUpload(token, dto, req.cookies.deposit_sid); } }
+Service ObjectStore (Garage) // src/object-store/object-store.service.ts import { Injectable, Inject } from '@nestjs/common'; import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectsCommand, HeadObjectCommand, CopyObjectCommand } from '@aws-sdk/client-s3'; import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+@Injectable() export class ObjectStoreService { private readonly client: S3Client;
+constructor( @Inject('S3_ENDPOINT') private endpoint: string, @Inject('S3_BUCKET') private bucket: string, @Inject('S3_ACCESS_KEY') private accessKey: string, @Inject('S3_SECRET_KEY') private secretKey: string, ) { this.client = new S3Client({ endpoint: this.endpoint, credentials: { accessKeyId: this.accessKey, secretAccessKey: this.secretKey, }, region: 'us-east-1', // Garage ignore la région }); }
+async generatePutPresignedUrl( key: string, contentType: string, expiresIn: number = 300, // 5 min ): Promise<string> { const command = new PutObjectCommand({ Bucket: this.bucket, Key: quarantine/${key}, ContentType: contentType, }); return getSignedUrl(this.client, command, { expiresIn }); }
+async generateGetPresignedUrl(key: string, expiresIn: number = 60): Promise<string> { const command = new GetObjectCommand({ Bucket: this.bucket, Key: key, }); return getSignedUrl(this.client, command, { expiresIn }); }
+async deletePrefix(prefix: string): Promise<void> { const list = await this.client.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, })); if (!list.Contents?.length) return;
+await this.client.send(new DeleteObjectsCommand({  
+  Bucket: this.bucket,  
+  Delete: { Objects: list.Contents.map((o) => ({ Key: o.Key! })) },  
+}));  
+} }
+2️⃣ Frontend (Next.js + Chakra UI v3) Composant PinInput (8 chiffres) // components/PinInput.tsx import { HStack, Input, useToast } from '@chakra-ui/react'; import { useState, useEffect } from 'react';
+export const PinInput = ({ onComplete, disabled = false, }: { onComplete: (pin: string) => void; disabled?: boolean; }) => { const [pin, setPin] = useState<string[]>(Array(8).fill('')); const toast = useToast();
+useEffect(() => { if (pin.join('').length === 8) { onComplete(pin.join('')); } }, [pin]);
+const handleChange = (index: number, value: string) => { if (/\D/.test(value)) return; // Chiffres uniquement const newPin = [...pin]; newPin[index] = value; setPin(newPin);
+// Passer au champ suivant automatiquement  
+if (value && index < 7) {  
+  const nextInput = document.getElementById(`pin-${index + 1}`) as HTMLInputElement;  
+  nextInput?.focus();  
+}  
+};
+const handleKeyDown = (index: number, e: React.KeyboardEvent) => { if (e.key === 'Backspace' && !pin[index] && index > 0) { const newPin = [...pin]; newPin[index - 1] = ''; setPin(newPin); const prevInput = document.getElementById(pin-${index - 1}) as HTMLInputElement; prevInput?.focus(); } };
+return ( <HStack spacing={2}> {pin.map((_, index) => ( <Input key={index} id={pin-${index}} type="text" maxLength={1} textAlign="center" fontSize="2xl" fontWeight="bold" w="10" h="12" borderRadius="8px" borderColor="gray.300" focusBorderColor="primary.500" value={pin[index]} onChange={(e) => handleChange(index, e.target.value)} onKeyDown={(e) => handleKeyDown(index, e)} disabled={disabled} autoFocus={index === 0} /> ))} </HStack> ); };
+Page de Déverrouillage (/d/[token]) // pages/d/[token].tsx import { useState } from 'react'; import { useRouter } from 'next/router'; import { Box, Heading, Text, VStack, Button, useToast } from '@chakra-ui/react'; import { PinInput } from '../../components/PinInput'; import { api } from '../../lib/api';
+export default function UnlockPage() { const router = useRouter(); const { token } = router.query; const [isLoading, setIsLoading] = useState(false); const toast = useToast();
+const handleUnlock = async (pin: string) => { setIsLoading(true); try { const res = await api.post(/public/${token}/unlock, { pin }); if (res.data.status === 'unlocked') { toast({ title: 'Déverrouillé', status: 'success' }); router.push(/d/${token}/upload); } } catch (error) { toast({ title: 'PIN incorrect ou lien expiré', status: 'error', description: error.response?.data?.error || 'Veuillez réessayer.', }); } finally { setIsLoading(false); } };
+return ( <Box maxW="md" mx="auto" mt={20} p={6}> <VStack spacing={6}> <Heading as="h1" size="xl" textAlign="center"> Déposer des pièces </Heading> <Text textAlign="center" color="gray.600"> Saisissez le code PIN à 8 chiffres fourni par votre avocat. </Text> <PinInput onComplete={handleUnlock} disabled={isLoading} /> <Button isLoading={isLoading} onClick={() => router.push('/')} variant="ghost" colorScheme="gray" > Retour </Button> </VStack> </Box> ); }
+Composant FileDropzone (Uppy + Garage) // components/FileDropzone.tsx import { useMemo } from 'react'; import { useDropzone } from 'react-dropzone'; import { Box, Text, VStack, Icon, useToast } from '@chakra-ui/react'; import { FiUploadCloud } from 'react-icons/fi'; import { useUppy } from '@uppy/react'; import AwsS3 from '@uppy/aws-s3';
+export const FileDropzone = ({ onUploadStart, onUploadSuccess, onUploadError, getUploadUrl, // Fonction pour obtenir l'URL présignée maxSize = 25 * 1024 * 1024, // 25 Mo allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'], }: { onUploadStart: (file: File) => void; onUploadSuccess: (file: File, key: string) => void; onUploadError: (file: File, error: Error) => void; getUploadUrl: (file: File) => Promise<{ url: string; key: string }>; }) => { const toast = useToast(); const uppy = useUppy(() => ({ restrictions: { maxFileSize: maxSize, maxNumberOfFiles: 10, allowedFileTypes: allowedTypes, }, onBeforeUpload: (files) => { onUploadStart(files[0].file); }, }));
+uppy.use(AwsS3, { getUploadParameters: async (file) => { const { url, key } = await getUploadUrl(file); return { url, fields: {}, }; }, });
+const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop: (acceptedFiles) => { if (acceptedFiles.length > 0) { uppy.addFiles(acceptedFiles); uppy.upload(); } }, maxSize, accept: allowedTypes.reduce((acc, type) => ({ ...acc, [type]: [] }), {}), });
+return ( <Box {...getRootProps()} borderWidth={2} borderStyle="dashed" borderColor="gray.300" borderRadius="12px" p={8} textAlign="center" cursor="pointer" _hover={{ borderColor: 'primary.500' }} bg={isDragActive ? 'primary.50' : 'transparent'} > <input {...getInputProps()} /> <VStack spacing={4}> <Icon as={FiUploadCloud} boxSize={10} color="gray.500" /> <Text fontSize="lg" color="gray.600"> {isDragActive ? 'Déposez le fichier ici' : 'Glissez-déposez ou cliquez pour sélectionner'} </Text> <Text fontSize="sm" color="gray.500"> PDF, JPG ou PNG (max 25 Mo) </Text> </VStack> </Box> ); };
+3️⃣ Docker & Déploiement docker-compose.yml version: '3.8'
+services:
+Backend (NestJS)
+api: build: context: ./backend dockerfile: Dockerfile ports: - "3000:3000" environment: - DATABASE_URL=postgresql://<REDACTED>:<REDACTED>@db:5432/div - S3_ENDPOINT=http://garage:7777 - S3_BUCKET=div-deposits - S3_ACCESS_KEY=<REDACTED> - S3_SECRET_KEY=<REDACTED> - SERVER_PEPPER=${SERVER_PEPPER} # Généré via openssl rand -hex 32 - COOKIE_SECRET=${COOKIE_SECRET} # Pour les sessions - NODE_ENV=production depends_on: - db - garage networks: - internal
+Frontend (Next.js)
+web: build: context: ./frontend dockerfile: Dockerfile ports: - "3001:3000" environment: - NEXT_PUBLIC_API_URL=http://localhost:3000 depends_on: - api networks: - internal
+Base de données
+db: image: postgres:15-alpine environment: - POSTGRES_USER=postgres - POSTGRES_PASSWORD=<REDACTED> - POSTGRES_DB=div volumes: - postgres_data:/var/lib/postgresql/data ports: - "5432:5432" networks: - internal
+Stockage objet (Garage)
+garage: image: deuxfleurs/garage:canary command: [ "server", "--data-dir=/data", "--metadata-dir=/metadata", "--listen-addr=0.0.0.0:7777", "--rpc-secret=<REDACTED>", ] volumes: - garage_data:/data - garage_metadata:/metadata ports: - "7777:7777" networks: - internal
+Observabilité
+prometheus: image: prom/prometheus:latest ports: - "9090:9090" volumes: - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml networks: - internal
+grafana: image: grafana/grafana:latest ports: - "3002:3000" volumes: - grafana_data:/var/lib/grafana networks: - internal
+Reverse Proxy (Nginx)
+nginx: image: nginx:alpine ports: - "80:80" - "443:443" volumes: - ./infra/nginx.conf:/etc/nginx/nginx.conf - ./infra/certs:/etc/nginx/certs - ./infra/conf.d:/etc/nginx/conf.d depends_on: - api - web networks: - internal
+volumes: postgres_data: garage_data: garage_metadata: grafana_data:
+networks: internal: driver: bridge
+install.sh (One-Click) #!/bin/bash set -e
+Couleurs
+RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' NC='\033[0m' # No Color
+Vérifier Docker
+if ! command -v docker &> /dev/null; then echo -e "${RED}Erreur: Docker n'est pas installé.${NC}" exit 1 fi
+Vérifier Docker Compose
+if ! command -v docker-compose &> /dev/null; then echo -e "${RED}Erreur: Docker Compose n'est pas installé.${NC}" exit 1 fi
+echo -e "${YELLOW}⏳ Construction des images...${NC}" docker-compose build
+echo -e "${YELLOW} Démarrage de la stack...${NC}" docker-compose up -d db garage prometheus grafana
+Attendre que PostgreSQL soit prêt
+echo -e "${YELLOW}⏳ Attente de PostgreSQL...${NC}" until docker-compose exec db pg_isready -U postgres; do sleep 1 done
+Initialiser Garage (layout)
+echo -e "${YELLOW}⏳ Initialisation de Garage...${NC}" docker-compose exec garage garage layout apply --name div
+Créer le bucket
+docker-compose exec garage garage bucket create div-deposits
+Lancer les migrations Prisma
+echo -e "${YELLOW}⏳ Application des migrations...${NC}" docker-compose exec api npx prisma migrate deploy
+Seeder la base (avocat démo)
+echo -e "${YELLOW}⏳ Seed de la base de données...${NC}" docker-compose exec api npx prisma db seed
+Démarrer l'API et le frontend
+docker-compose up -d api web
+Configurer Nginx + Let's Encrypt
+echo -e "${YELLOW}⏳ Configuration de Nginx et Let's Encrypt...${NC}" ./infra/setup-nginx.sh
+Afficher les URLs
+echo -e "${GREEN}✅ Stack démarrée avec succès !${NC}" echo -e "${GREEN} URLs disponibles:${NC}" echo -e " - Portail avocat: https://${SUBDOMAIN:-localhost}" echo -e " - Dashboard Grafana: http://localhost:3002 (login: <REDACTED>)" echo -e " - Prometheus: http://localhost:9090" echo -e "" echo -e "${YELLOW}⚠️ Identifiants avocat démo:${NC}" echo -e " - Email: <REDACTED>" echo -e " - Mot de passe: <REDACTED>"
+Dockerfile (Backend)
+Stage 1: Build
+FROM node:20-alpine AS builder
+WORKDIR /app
+Copier les fichiers de dépendances
+COPY package*.json ./ COPY prisma ./prisma/
+Installer les dépendances
+RUN npm ci
+Copier le code source
+COPY . .
+Builder l'application
+RUN npm run build
+Stage 2: Production
+FROM node:20-alpine
+WORKDIR /app
+Copier les dépendances de production
+COPY --from=builder /app/node_modules ./node_modules COPY --from=builder /app/package*.json ./ COPY --from=builder /app/prisma ./prisma/ COPY --from=builder /app/dist ./dist COPY --from=builder /app/.env ./
+Installer Prisma client
+RUN npx prisma generate
+Créer un utilisateur non-root
+RUN addgroup -g 1001 -S nodejs &&  adduser -S -u 1001 -G nodejs nodejs
+USER nodejs
+EXPOSE 3000
+CMD ["node", "dist/main"]
+ CRITÈRES DE QUALITÉ À RESPECTER (Classés par priorité DIV Protocol) ⭐ P0 — Éliminatoire (100% obligatoire) [ ] Parcours métier complet : Avocat : Login → Créer demande → Dashboard (statuts) Client : Accès lien → PIN → Upload → Confirmation [ ] Stack imposée : Backend: NestJS Frontend: Next.js + Chakra UI v3 (charte DIV respectée) Stockage: Garage (pas MinIO) Base: PostgreSQL Déploiement: Docker + registre (GHCR/Docker Hub) + Nginx + Let's Encrypt [ ] Fonctionnalités clés : Auth avocat (session cookie) Génération token + PIN (split-secret) Upload via PUT présigné (pas via API NestJS) Expiration + purge physique (DeleteObjects) Lockout PIN (5 échecs → 15 min) [ ] Déploiement one-click : ./install.sh → Stack opérationnelle + URLs affichées Aucun code source sur le serveur (seulement images Docker + config)
+ P1 — Attendu (Différenciateur) [ ] Tests Jest : Expiration (lien valide/expiré) Vérification PIN (correct/incorrect/lockout) Transitions de statut (PENDING → COMPLETE → EXPIRED) Auth (accès avocat vs client) Isolation tenant (avocat A ne voit pas les demandes de B) [ ] Observabilité : Prometheus + Grafana fonctionnels 1 alerte actionnable (ex: taux 5xx > 5% sur 5 min) Métriques métier: pin_failures_total, uploads_failed_total, purge_deleted_objects_total Logs JSON (Pino) avec requestId et ipHash [ ] UX/UI : Charte DIV respectée à 100% (couleurs, typographie, boutons, cards) États vides/loading/error gérés Progression d’upload visible (Uppy) Responsive 375px [ ] README.md : Setup (comment lancer) Architecture (choix techniques justifiés) Tests (comment les exécuter) Limites (ce qu’on ferait avec + de temps) Preuves (export conversations IA dans /ai-logs/)
+✨ P2 — Bonus (Optionnel mais apprécié) [ ] Sécurité avancée : Antivirus (ClamAV sidecar) Rate limiting global (@nestjs/throttler) Journal d’audit (AuditLog table) [ ] Optimisations : URLs présignées GET pour le download avocat CI (GitHub Actions) avec tests automatiques Cache Redis pour les sessions (si temps) [ ] Bonus DIV : Magic-bytes validation pour les uploads Quarantaine avant promotion (décrite dans Grok) TTL configurable par avocat
+ CHECKLIST DES LIVRABLES
+ Structure du Repo exo2-portail-depot/ ├── backend/ # NestJS │ ├── src/ │ │ ├── deposit/ # RequestsModule, PublicDepositModule │ │ ├── crypto/ # Argon2id, HMAC │ │ ├── object-store/ # Garage (S3) │ │ ├── audit/ # AuditLog │ │ └── reaper/ # Purge physique │ ├── prisma/ │ │ ├── schema.prisma # Modèle de données │ │ └── seed.ts # Avocat démo │ ├── Dockerfile │ └── package.json │ ├── frontend/ # Next.js + Chakra UI v3 │ ├── pages/ │ │ ├── avocat/ # Login, Dashboard, Créer demande │ │ └── d/ # [token].tsx, upload.tsx │ ├── components/ # PinInput, FileDropzone, StatusBadge │ ├── styles/ # Theme Chakra (charte DIV) │ ├── Dockerfile │ └── package.json │ ├── infra/ # Déploiement │ ├── docker-compose.yml │ ├── nginx.conf │ ├── prometheus.yml │ └── setup-nginx.sh # Let's Encrypt │ ├── ai-logs/ # Export conversations IA │ └── exo2-conversations.txt (à ne pas remplir dabord à laisser vide pour plus tard) │ ├── install.sh # One-click deploy ├── README.md # Documentation complète └── .env.example # Variables d'environnement
+ Configuration Obligatoire Fichier Contenu .env.example Toutes les variables (DATABASE_URL, S3_*, PEPPER, COOKIE_SECRET) sans valeurs README.md Setup, architecture, tests, limites, preuves IA install.sh One-click (build, up, migrations, seed, HTTPS) docker-compose.yml Tous les services (api, web, db, garage, prometheus, grafana, nginx) prisma/schema.prisma Modèle de données complet (User, DepositRequest, UploadedFile, DepositSession, AuditLog)
+ COMMANDE POUR LES AGENTS
+ TU ES UN INGÉNIEUR FULL-STACK SENIOR CHEZ DIV PROTOCOL. TA MISSION : Implémenter la solution Split-Secret Deposit (décrite ci-dessus) en respectant 100% des contraintes des documents fournis.  RÈGLES ABSOLUES : Priorité P0 > P1 > P2 : Ne passe à P1 que si P0 est 100% fonctionnel. Garage, pas MinIO : MinIO CE est archivé (04/2026) → fail automatique si utilisé. Split-Secret : Token (URL) + PIN (hors bande) + session opaque (cookie). PUT présigné : Les fichiers ne doivent pas transiter par NestJS (DoS). Purge physique : DeleteObjects à expiration + invalidation sessions. Charte DIV : Boutons, couleurs, typographie respectées à la lettre.  LIVRABLE ATTENDU : Un repo Git avec la structure ci-dessus, testable en local via ./install.sh.  ÉTAPES OBLIGATOIRES : Lire attentivement les 4 documents joints (énoncé, CDC GPT, rapport Grok) Valider que tu as compris la solution Split-Secret Deposit (pose des questions si besoin) Pour finir code la solution
+Ordre d’évaluation : Lisibilité > Architecture > Performance > Sécurité > Tests. !!! La solution que tu fourniras ne devra pas etre déployé sur les serveurs de DIV Protocol mais doit etre local sur mon PC !!!
+
+
+
